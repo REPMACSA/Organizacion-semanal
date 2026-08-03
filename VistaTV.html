@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>Organizador Semanal - Vista TV</title>
+<style>
+  :root { --border:#334155; --text:#1e293b; }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  body { font-family:'Segoe UI', Arial, sans-serif; background:#0f172a; color:#fff; }
+  #configBox { max-width:640px; margin:60px auto; padding:20px; background:#1e293b; border-radius:14px; }
+  #configBox input { width:100%; padding:10px; border-radius:8px; border:none; margin-top:10px; }
+  #configBox button { width:100%; padding:12px; margin-top:10px; border:none; border-radius:8px; background:#4f46e5; color:#fff; font-weight:600; cursor:pointer; }
+  .tv-titulo { text-align:center; font-size:26px; font-weight:700; padding:16px 0 4px; letter-spacing:0.5px; }
+  .tv-fecha { color:#94a3b8; text-align:center; font-size:15px; margin-bottom:14px; font-weight:600; }
+  table.tv-grid { width:100%; border-collapse:collapse; table-layout:fixed; }
+  table.tv-grid th { background:#1e293b; color:#e2e8f0; font-size:15px; padding:10px 6px; text-align:center; border:1px solid var(--border); }
+  table.tv-grid td { border:1px solid var(--border); vertical-align:top; padding:6px; background:#111827; }
+  .tec-nombre { color:#c7d2fe; font-weight:700; font-size:14px; text-align:left; padding:8px !important; background:#1e293b !important; }
+  .tec-nombre.guardia { background:#7c2d12 !important; color:#fed7aa !important; }
+  .badge-g { display:inline-block; background:#f97316; color:#1c0a00; font-weight:800; border-radius:6px; padding:1px 6px; font-size:12px; margin-left:6px; }
+  .franja { border-radius:7px; padding:5px 7px; margin-bottom:4px; font-size:12.5px; color:#0f172a; font-weight:600; min-height:22px; }
+  .franja.manana { background:#fde68a; }
+  .franja.tarde { background:#93c5fd; }
+  .franja.noche { background:#c4b5fd; }
+  .franja.vacio { background:#1f2937; color:#475569; font-weight:400; font-style:italic; }
+  .guardia-footer { margin:18px 16px 0; background:#7c2d12; border-radius:12px; padding:16px 20px; color:#fed7aa; font-size:16px; font-weight:700; text-align:center; }
+  .guardia-footer span { color:#fff; }
+  .reloj { text-align:center; color:#475569; font-size:12px; padding:10px 0 20px; }
+  @media (min-width:1200px) {
+    .tv-titulo { font-size:34px; } .tv-fecha { font-size:19px; }
+    table.tv-grid th { font-size:19px; padding:14px 6px; } .tec-nombre { font-size:17px; }
+    .franja { font-size:16px; padding:8px 10px; margin-bottom:6px; } .guardia-footer { font-size:22px; padding:20px; }
+  }
+  @media (min-width:1700px) {
+    .tv-titulo { font-size:44px; } .tv-fecha { font-size:23px; }
+    table.tv-grid th { font-size:23px; padding:16px 8px; } .tec-nombre { font-size:21px; }
+    .franja { font-size:19px; padding:10px 12px; margin-bottom:7px; min-height:30px; }
+    .guardia-footer { font-size:27px; padding:24px; } .badge-g { font-size:15px; padding:2px 9px; }
+  }
+</style>
+</head>
+<body>
+
+<div id="configBox" style="display:none;">
+  <h2>📅 Organizador Semanal — Vista TV</h2>
+  <p style="color:#94a3b8;margin-top:10px;">Primera vez: pegá la URL de la API (termina en /exec)</p>
+  <input type="text" id="scriptUrlInput" placeholder="https://script.google.com/macros/s/.../exec">
+  <button onclick="guardarScriptUrl()">Guardar y empezar</button>
+</div>
+
+<div id="tvBox" style="display:none;">
+  <div class="tv-titulo">🔧 Semana de Trabajo — Técnicos Mendoza</div>
+  <div class="tv-fecha" id="tvFecha"></div>
+  <table class="tv-grid" id="tablaTV"></table>
+  <div class="guardia-footer">📞 Guardia telefónica esta semana: <span id="guardiaFooterTexto">—</span></div>
+  <div class="reloj" id="reloj"></div>
+</div>
+
+<script>
+let SCRIPT_URL = localStorage.getItem('organizador_scriptUrl') || 'https://script.google.com/macros/s/AKfycbwE6z9kaEUyxmSDVNs1eockHCf4evp_gTCJQLHrZoSqd24pkOVtVS3lovSQLzkPpaOYyQ/exec';
+const KEY_URL = 'organizador_scriptUrl';
+
+const DIAS = ['Lunes','Martes','Miércoles','Jueves','Viernes','Sábado','Domingo'];
+const FRANJAS = [
+  { key:'manana', label:'Mañana', clase:'manana' },
+  { key:'tarde', label:'Tarde', clase:'tarde' },
+  { key:'noche', label:'Noche', clase:'noche' }
+];
+let TECNICOS = [];
+
+function initConexion() {
+  if (!SCRIPT_URL) { document.getElementById('configBox').style.display = 'block'; }
+  else { arrancar(); }
+}
+function guardarScriptUrl() {
+  const url = document.getElementById('scriptUrlInput').value.trim();
+  if (!url) return;
+  localStorage.setItem(KEY_URL, url);
+  SCRIPT_URL = url;
+  document.getElementById('configBox').style.display = 'none';
+  arrancar();
+}
+
+function api(action, data) {
+  return new Promise((resolve, reject) => {
+    const cbName = 'cb_' + Date.now() + '_' + Math.floor(Math.random() * 1000000);
+    window[cbName] = function(payload) {
+      delete window[cbName];
+      script.remove();
+      if (payload && payload.ok) resolve(payload);
+      else reject(new Error((payload && payload.msg) || 'Error desconocido'));
+    };
+    const url = SCRIPT_URL + '?action=' + encodeURIComponent(action) + '&data=' + encodeURIComponent(JSON.stringify(data || {})) + '&callback=' + cbName;
+    const script = document.createElement('script');
+    script.src = url;
+    script.onerror = function() { delete window[cbName]; script.remove(); reject(new Error('sin conexión')); };
+    document.body.appendChild(script);
+  });
+}
+
+function calcularRangoSemana(fechaInicio) {
+  if (!fechaInicio) return '';
+  const inicio = new Date(fechaInicio + 'T00:00:00');
+  const fin = new Date(inicio); fin.setDate(inicio.getDate() + 6);
+  const op = { day:'2-digit', month:'2-digit' };
+  return 'Semana del ' + inicio.toLocaleDateString('es-AR', op) + ' al ' + fin.toLocaleDateString('es-AR', op) + ' de ' + fin.getFullYear();
+}
+
+async function arrancar() {
+  document.getElementById('tvBox').style.display = 'block';
+  try {
+    const res = await api('getPersonal', {});
+    TECNICOS = res.tecnicos;
+  } catch(e) { console.warn(e); }
+  await renderTV();
+  // Auto-refresco cada 2 minutos, para que la tele no necesite control remoto ni PC al lado.
+  setInterval(renderTV, 120000);
+  setInterval(actualizarReloj, 1000);
+}
+
+function actualizarReloj() {
+  document.getElementById('reloj').textContent = 'Última actualización: ' + new Date().toLocaleTimeString('es-AR');
+}
+
+async function renderTV() {
+  try {
+    const res = await api('getAgendaCompleta', {});
+    document.getElementById('tvFecha').textContent = calcularRangoSemana(res.fechaInicio);
+
+    const agendaPorTecnicoDia = {};
+    (res.agenda || []).forEach(r => {
+      const key = r.tecnico + '|' + r.dia + '|' + r.franja;
+      agendaPorTecnicoDia[key] = r.trabajo;
+    });
+
+    const guardiaTurno = new Set(res.guardiaTurno || []);
+    const guardiaTel = res.guardiaTel || [];
+
+    let html = '<tr><th style="text-align:left;">Técnico</th>' + DIAS.map(d => '<th>' + d + '</th>').join('') + '</tr>';
+
+    TECNICOS.forEach(tec => {
+      const enGuardia = guardiaTurno.has(tec);
+      const claseNombre = 'tec-nombre' + (enGuardia ? ' guardia' : '');
+      const badge = enGuardia ? '<span class="badge-g">G</span>' : '';
+      html += '<tr><td class="' + claseNombre + '">' + tec + badge + '</td>';
+      DIAS.forEach(dia => {
+        html += '<td>';
+        FRANJAS.forEach(f => {
+          if (f.key === 'noche' && !enGuardia) return;
+          const texto = agendaPorTecnicoDia[tec + '|' + dia + '|' + f.key];
+          if (texto) html += '<div class="franja ' + f.clase + '">' + texto + '</div>';
+          else html += '<div class="franja vacio">libre</div>';
+        });
+        html += '</td>';
+      });
+      html += '</tr>';
+    });
+
+    document.getElementById('tablaTV').innerHTML = html;
+    document.getElementById('guardiaFooterTexto').textContent = guardiaTel.length ? guardiaTel.join(' · ') : 'sin asignar';
+    actualizarReloj();
+  } catch (e) {
+    document.getElementById('reloj').textContent = '⚠️ Sin conexión — reintentando...';
+  }
+}
+
+initConexion();
+</script>
+</body>
+</html>

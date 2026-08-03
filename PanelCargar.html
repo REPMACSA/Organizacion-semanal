@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>Organizador Semanal - Cargar</title>
+<style>
+  :root { --primary:#4f46e5; --primary-dark:#4338ca; --primary-light:#eef2ff; --border:#e2e8f0; --text:#1e293b; --muted:#64748b; }
+  * { box-sizing:border-box; }
+  body { font-family:'Segoe UI', Arial, sans-serif; margin:0; padding:0; background:#f1f5f9; color:var(--text); }
+  .container { max-width:640px; margin:0 auto; padding:18px 14px 60px; }
+  h1 { font-size:21px; color:#1e1b4b; }
+  .card { background:#fff; border-radius:14px; padding:20px; box-shadow:0 4px 14px rgba(30,27,75,0.08); border:1px solid var(--border); margin-bottom:16px; }
+  label { display:block; font-size:13px; font-weight:600; margin-top:14px; margin-bottom:5px; }
+  select, input, textarea { width:100%; padding:10px; border:1.5px solid var(--border); border-radius:9px; font-size:14px; font-family:inherit; }
+  button.guardar { background:var(--primary); color:#fff; border:none; padding:12px 20px; border-radius:10px; font-weight:600; margin-top:16px; cursor:pointer; width:100%; }
+  button.guardar:hover { background:var(--primary-dark); }
+  .aviso { background:#fffbeb; border:1.5px solid #fde68a; color:#92400e; padding:10px 14px; border-radius:10px; font-size:13px; margin-bottom:14px; }
+  .config-box { background:#fffbeb; border:1.5px solid #fde68a; padding:14px; border-radius:10px; margin-bottom:14px; font-size:13px; }
+  .resultado { margin-top:10px; font-size:13px; color:#166534; }
+  a.link-tv { display:inline-block; margin-top:10px; color:var(--primary); font-weight:600; text-decoration:none; }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>📅 Organizador Semanal — Cargar (Franco)</h1>
+
+  <div id="configBox" class="config-box" style="display:none;">
+    ⚙️ Primera vez: pegá la URL de la API de Apps Script (termina en <code>/exec</code>)
+    <input type="text" id="scriptUrlInput" placeholder="https://script.google.com/macros/s/.../exec">
+    <button class="guardar" onclick="guardarScriptUrl()">Guardar URL</button>
+  </div>
+
+  <div id="appBox" style="display:none;">
+    <div class="card">
+      <h3>Cargar / editar trabajo</h3>
+      <label>Técnico</label>
+      <select id="tecnico"></select>
+      <label>Día</label>
+      <select id="dia">
+        <option>Lunes</option><option>Martes</option><option>Miércoles</option>
+        <option>Jueves</option><option>Viernes</option><option>Sábado</option><option>Domingo</option>
+      </select>
+      <label>Franja horaria</label>
+      <select id="franja">
+        <option value="manana">Mañana</option>
+        <option value="tarde">Tarde</option>
+        <option value="noche">Noche (solo guardia)</option>
+      </select>
+      <label>Trabajo / cliente / tarea</label>
+      <textarea id="trabajo" rows="2" placeholder="Ej: Cencosud Vistalba - reparación cámara"></textarea>
+      <button class="guardar" onclick="guardarTrabajo()">Guardar</button>
+      <div id="resultadoCarga" class="resultado"></div>
+    </div>
+
+    <div class="card">
+      <h3>📅 Semana</h3>
+      <label>Fecha de inicio (lunes)</label>
+      <input type="date" id="fechaInicio" onchange="guardarFechaInicio()">
+    </div>
+
+    <div class="card">
+      <h3>🛠️ Guardia de turno (normalmente 2 personas)</h3>
+      <div id="checksGuardiaTurno"></div>
+      <button class="guardar" style="background:#ea580c;" onclick="guardarGuardiaTurno()">Guardar guardia de turno</button>
+    </div>
+
+    <div class="card">
+      <h3>📞 Guardia telefónica (rotan entre estos 4)</h3>
+      <div id="checksGuardiaTel"></div>
+      <button class="guardar" style="background:#0369a1;" onclick="guardarGuardiaTel()">Guardar guardia telefónica</button>
+    </div>
+
+    <div class="card" style="text-align:center;">
+      <p style="font-size:13px;color:var(--muted);">Para ver cómo queda en la tele, o para imprimir un respaldo los viernes:</p>
+      <a class="link-tv" id="linkVistaTV" href="VistaTV.html" target="_blank">📺 Abrir Vista TV en una pestaña nueva</a>
+    </div>
+  </div>
+</div>
+
+<script>
+let SCRIPT_URL = localStorage.getItem('organizador_scriptUrl') || 'https://script.google.com/macros/s/AKfycbwE6z9kaEUyxmSDVNs1eockHCf4evp_gTCJQLHrZoSqd24pkOVtVS3lovSQLzkPpaOYyQ/exec';
+const KEY_URL = 'organizador_scriptUrl';
+
+function initConexion() {
+  if (!SCRIPT_URL) { document.getElementById('configBox').style.display = 'block'; }
+  else { document.getElementById('appBox').style.display = 'block'; init(); }
+}
+function guardarScriptUrl() {
+  const url = document.getElementById('scriptUrlInput').value.trim();
+  if (!url) return;
+  localStorage.setItem(KEY_URL, url);
+  SCRIPT_URL = url;
+  document.getElementById('configBox').style.display = 'none';
+  document.getElementById('appBox').style.display = 'block';
+  init();
+}
+
+function api(action, data) {
+  return new Promise((resolve, reject) => {
+    const cbName = 'cb_' + Date.now() + '_' + Math.floor(Math.random() * 1000000);
+    window[cbName] = function(payload) {
+      delete window[cbName];
+      script.remove();
+      if (payload && payload.ok) resolve(payload);
+      else reject(new Error((payload && payload.msg) || 'Error desconocido'));
+    };
+    const url = SCRIPT_URL + '?action=' + encodeURIComponent(action) + '&data=' + encodeURIComponent(JSON.stringify(data || {})) + '&callback=' + cbName;
+    const script = document.createElement('script');
+    script.src = url;
+    script.onerror = function() { delete window[cbName]; script.remove(); reject(new Error('No se pudo conectar')); };
+    document.body.appendChild(script);
+  });
+}
+
+let TECNICOS = [];
+let OPCIONES_GUARDIA_TEL = [];
+
+async function init() {
+  try {
+    const res = await api('getPersonal', {});
+    TECNICOS = res.tecnicos;
+    OPCIONES_GUARDIA_TEL = res.opcionesGuardiaTel;
+
+    const selTec = document.getElementById('tecnico');
+    TECNICOS.forEach(t => selTec.appendChild(new Option(t, t)));
+
+    document.getElementById('checksGuardiaTurno').innerHTML = TECNICOS.map(t =>
+      `<label style="display:flex;align-items:center;gap:8px;font-weight:400;margin-top:8px;">
+        <input type="checkbox" value="${t}" class="chkGuardiaTurno" style="width:auto;"> ${t}</label>`
+    ).join('');
+
+    document.getElementById('checksGuardiaTel').innerHTML = OPCIONES_GUARDIA_TEL.map(t =>
+      `<label style="display:flex;align-items:center;gap:8px;font-weight:400;margin-top:8px;">
+        <input type="checkbox" value="${t}" class="chkGuardiaTel" style="width:auto;"> ${t}</label>`
+    ).join('');
+
+    await cargarEstadoActual();
+  } catch (e) {
+    alert('Error de conexión: ' + e.message);
+  }
+}
+
+async function cargarEstadoActual() {
+  try {
+    const res = await api('getAgendaCompleta', {});
+    if (res.fechaInicio) document.getElementById('fechaInicio').value = res.fechaInicio;
+    else {
+      const hoy = new Date();
+      const off = hoy.getDay() === 0 ? -6 : 1 - hoy.getDay();
+      const lunes = new Date(hoy); lunes.setDate(hoy.getDate() + off);
+      document.getElementById('fechaInicio').value = lunes.toISOString().split('T')[0];
+    }
+    document.querySelectorAll('.chkGuardiaTurno').forEach(c => { c.checked = (res.guardiaTurno || []).includes(c.value); });
+    document.querySelectorAll('.chkGuardiaTel').forEach(c => { c.checked = (res.guardiaTel || []).includes(c.value); });
+  } catch (e) {
+    console.warn('No se pudo precargar el estado actual', e);
+  }
+}
+
+async function guardarTrabajo() {
+  const tecnico = document.getElementById('tecnico').value;
+  const dia = document.getElementById('dia').value;
+  const franja = document.getElementById('franja').value;
+  const trabajo = document.getElementById('trabajo').value.trim();
+  try {
+    await api('guardarTrabajo', { tecnico, dia, franja, trabajo });
+    document.getElementById('resultadoCarga').innerText = '✅ Guardado: ' + tecnico + ' — ' + dia + ' (' + franja + ')';
+    document.getElementById('trabajo').value = '';
+  } catch (e) {
+    document.getElementById('resultadoCarga').innerText = '❌ Error: ' + e.message;
+  }
+}
+
+async function guardarFechaInicio() {
+  const fecha = document.getElementById('fechaInicio').value;
+  try { await api('guardarFechaInicio', { fecha }); } catch (e) { alert('Error: ' + e.message); }
+}
+
+async function guardarGuardiaTurno() {
+  const seleccion = [...document.querySelectorAll('.chkGuardiaTurno:checked')].map(c => c.value);
+  try {
+    await api('guardarGuardiaTurno', { tecnicos: seleccion });
+    document.getElementById('resultadoCarga').innerText = '✅ Guardia de turno: ' + (seleccion.length ? seleccion.join(', ') : 'nadie seleccionado');
+  } catch (e) { alert('Error: ' + e.message); }
+}
+
+async function guardarGuardiaTel() {
+  const seleccion = [...document.querySelectorAll('.chkGuardiaTel:checked')].map(c => c.value);
+  try {
+    await api('guardarGuardiaTel', { tecnicos: seleccion });
+    document.getElementById('resultadoCarga').innerText = '✅ Guardia telefónica: ' + (seleccion.length ? seleccion.join(', ') : 'nadie seleccionado');
+  } catch (e) { alert('Error: ' + e.message); }
+}
+
+initConexion();
+</script>
+</body>
+</html>
